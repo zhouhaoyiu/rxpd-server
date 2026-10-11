@@ -1,63 +1,65 @@
-from flask import Blueprint, request
-import json
+from flask import Blueprint, request, jsonify, abort
+from mysqlconfig import query, execute, transaction
+from security import admin
 
-from mysqlconfig import mydb
+person_api = Blueprint("person_api", __name__)
 
-person_api = Blueprint('person_api', __name__)
+def person_input():
+    body = request.get_json()
+    data = body.get("personInfo") if isinstance(body, dict) else None
+    if not isinstance(data, dict):
+        abort(400, "人员资料格式错误")
+    for field in ("personName", "personWx"):
+        if not isinstance(data.get(field), str) or not data[field].strip() or len(data[field]) > 128:
+            abort(400, "请填写姓名与联系标识")
+    return data
 
+@person_api.get("/getPersonList")
+def get_people():
+    return jsonify(query("SELECT personId,personName,personWx FROM person WHERE active = 1 ORDER BY personId"))
 
-@person_api.route('/addPerson', methods=['POST'])
-def addPerson():
-    data = json.loads(request.get_data())
-    personInfo = data['personInfo']
-    personName = personInfo['personName']
-    personWx = personInfo['personWx']
+@person_api.post("/addPerson")
+def add_person():
+    admin()
+    data = person_input()
+    with transaction():
+        identifier, _ = execute("INSERT INTO person (personName,personWx,active) VALUES (%s,%s,1)",
+                                (data["personName"].strip(), data["personWx"].strip()))
+        person = query("SELECT personId,personName,personWx FROM person WHERE personId = %s", (identifier,))[0]
+    return jsonify(success=True, data=person)
 
-    cursor = mydb.cursor()
-    cursor.execute("INSERT INTO person (personName, personWx) VALUES (%s, %s)",
-                   (personName, personWx))
+@person_api.post("/changePerson")
+def change_person():
+    admin()
+    data = person_input()
+    if not data.get("personId"):
+        abort(400, "缺少人员编号")
+    with transaction():
+        if not query("SELECT personId FROM person WHERE personId = %s AND active = 1", (data["personId"],)):
+            abort(404, "人员不存在")
+        execute("UPDATE person SET personName=%s,personWx=%s WHERE personId=%s",
+                (data["personName"].strip(), data["personWx"].strip(), data["personId"]))
+        person = query("SELECT personId,personName,personWx FROM person WHERE personId=%s", (data["personId"],))[0]
+    return jsonify(success=True, data=person)
 
-    mydb.commit()
-    return json.dumps({'success': True}, ensure_ascii=False)
+@person_api.post("/deletePerson")
+def delete_person():
+    admin()
+    data = request.get_json()
+    if not isinstance(data, dict) or not data.get("personId"):
+        abort(400, "缺少人员编号")
+    with transaction():
+        _, count = execute("UPDATE person SET active=0 WHERE personId=%s AND active=1", (data["personId"],))
+        if count != 1:
+            abort(404, "人员不存在")
+    return jsonify(success=True)
 
-
-@person_api.route('/changePerson', methods=['POST'])
-def changePerson():
-    data = json.loads(request.get_data())
-    personInfo = data['personInfo']
-    personId = personInfo['personId']
-    personName = personInfo['personName']
-    personWx = personInfo['personWx']
-
-    cursor = mydb.cursor()
-    cursor.execute("UPDATE person SET personName = %s, personWx = %s WHERE personId = %s",
-                   (personName, personWx, personId))
-
-    mydb.commit()
-    return json.dumps({'success': True}, ensure_ascii=False)
-
-
-@person_api.route('/deletePerson', methods=['POST'])
-def deletePerson():
-    data = json.loads(request.get_data())
-    personId = data['personId']
-
-    cursor = mydb.cursor()
-    cursor.execute("DELETE FROM person WHERE personId = %s", (personId,))
-
-    mydb.commit()
-    return json.dumps({'success': True}, ensure_ascii=False)
-
-
-@person_api.route('/getPersonByPersonId', methods=['GET'])
-def getPerson():
-    data = json.loads(request.get_data())
-    personId = request.args.get('personId')
-    cursor = mydb.cursor()
-    cursor.execute("SELECT * FROM person WHERE personId = %s", (personId,))
-    domain = cursor.description
-    result = []
-    for row in cursor.fetchall():
-        result.append(dict(zip([col[0] for col in domain], row)))
-
-    return json.dumps({'success': True}, result, ensure_ascii=False)
+@person_api.get("/getPersonByPersonId")
+def get_person():
+    identifier = request.args.get("personId")
+    if not identifier:
+        abort(400, "缺少人员编号")
+    rows = query("SELECT personId,personName,personWx FROM person WHERE personId=%s AND active=1", (identifier,))
+    if not rows:
+        abort(404, "人员不存在")
+    return jsonify(success=True, data=rows[0])
