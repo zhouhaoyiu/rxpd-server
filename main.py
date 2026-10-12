@@ -9,7 +9,10 @@ from security import authenticate, require_session, sessions, lock
 
 def create_app(test_config=None):
     app = Flask(__name__)
-    app.config.update(MAX_CONTENT_LENGTH=1024 * 1024)
+    app.config.update(
+        MAX_CONTENT_LENGTH=1024 * 1024,
+        SQLITE_DATABASE=os.environ.get("APP_SQLITE_PATH"),
+    )
     if test_config:
         app.config.update(test_config)
     app.json.ensure_ascii = False

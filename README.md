@@ -7,3 +7,9 @@
 备份数据库、处理重复工单编号后执行 migrations/001_workflow.sql。工单以版本号检测并发修改，状态转换、转派原因及操作人写入同一事务的历史表。归档保留原记录，人员停用不删除历史引用。旧工单中仅有姓名/微信的指派信息，在编辑时重新选择人员以绑定人员 ID。
 
 `pytest` 使用独立临时 SQLite 数据库，不连接业务 MySQL。此前入库的数据库凭据须在数据库服务端轮换。
+
+本地演示可使用持久化 SQLite，不需要 MySQL，也不启用 Flask 测试模式。先运行
+`python -m local_database /absolute/private/path/dispatch.sqlite3`，再设置
+`APP_SQLITE_PATH` 为该文件、`APP_USERS_FILE` 为私有账号文件，运行 `python main.py`。
+认证、角色权限、版本冲突和操作历史均保留。未设置 `APP_SQLITE_PATH` 时仍使用 MySQL。
+本地数据库、账号文件和日志不应加入 Git；服务重启后需重新登录，工单数据保留。
